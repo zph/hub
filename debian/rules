@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+build:
+	rake standalone
+
+clean:
+	dh_clean hub
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_prep
+	rake install prefix=debian/hub/usr
+
+binary-indep: install
+	dh_installman
+	dh_installdeb
+	dh_fixperms
+	dh_installchangelogs
+	dh_installdocs
+	dh_compress
+	dh_md5sums --include-conffiles
+	dh_gencontrol
+	dh_builddeb
+
+binary-arch: binary-indep
+
+binary: binary-indep
+
+get-orig-source:
+	uscan --download-current-version --force-download --rename

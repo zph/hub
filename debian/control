@@ -1,0 +1,18 @@
+Source: hub
+Section: devel
+Priority: optional
+Maintainer: Sebastian Boehm <sebastian@sometimesfood.org>
+Build-Depends: debhelper (>= 7), rake
+Standards-Version: 3.8.4
+Homepage: http://chriswanstrath.com/hub/
+Vcs-git: git://github.com/defunkt/hub.git
+Vcs-Browser: https://github.com/defunkt/hub
+
+Package: hub
+Architecture: all
+Depends: ${misc:Depends}, ruby, git-core
+Description: a command line utility which adds GitHub knowledge to git
+ Hub enhances various Git commands with GitHub remote expansion.
+ .
+ It provides commands to make forking, fetching, browsing
+ and creating projects on GitHub easier.
