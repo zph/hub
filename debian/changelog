@@ -1,7 +1,7 @@
-hub (1.4.1-1) UNRELEASED; urgency=low
+hub (1.4.1-1) lucid; urgency=low
 
   * Initial release
   * Fix dot escaping errors in the manpage that were caused by a bug in
     ronn, fixed in ronn: https://github.com/rtomayko/ronn/issues/42
 
- -- Sebastian Boehm <sebastian@sometimesfood.org>  Sat, 11 Dec 2010 13:50:23 +0100
+ -- Sebastian Boehm <sebastian@sometimesfood.org>  Mon, 13 Dec 2010 16:26:47 +0100
