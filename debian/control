@@ -5,8 +5,8 @@ Maintainer: Sebastian Boehm <sebastian@sometimesfood.org>
 Build-Depends: debhelper (>= 7), rake
 Standards-Version: 3.8.4
 Homepage: http://chriswanstrath.com/hub/
-Vcs-git: git://github.com/defunkt/hub.git
-Vcs-Browser: https://github.com/defunkt/hub
+Vcs-git: git://github.com/sometimesfood/hub.git
+Vcs-Browser: https://github.com/sometimesfood/hub
 
 Package: hub
 Architecture: all
