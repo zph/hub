@@ -24,7 +24,7 @@ binary-indep: install
 	dh_gencontrol
 	dh_builddeb
 
-binary-arch: binary-indep
+binary-arch:
 
 binary: binary-indep
 
