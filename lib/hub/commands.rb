@@ -149,16 +149,16 @@ module Hub
       if args.include?('--multiple')
         names = args.words[1..-1]
       # $ hub fetch <name>
-      elsif name = args.words[1]
+      elsif remote_name = args.words[1]
         # $ hub fetch <name1>,<name2>,...
-        if name =~ /^\w+(,\w+)+$/
-          index = args.index(name)
-          args.delete(name)
-          names = name.split(',')
+        if remote_name =~ /^\w+(,\w+)+$/
+          index = args.index(remote_name)
+          args.delete(remote_name)
+          names = remote_name.split(',')
           args.insert(index, *names)
           args.insert(index, '--multiple')
         else
-          names = [name]
+          names = [remote_name]
         end
       else
         names = []
@@ -170,11 +170,9 @@ module Hub
       }
 
       if names.any?
-        commands = names.map { |name| "git remote add #{name} #{github_url(:user => name)}" }
-        commands << args.to_exec.join(' ')
-        args.replace commands.shift.split(' ')
-        args.shift # don't want "git"
-        args.after commands.join('; ')
+        names.each do |name|
+          args.before ['remote', 'add', name, github_url(:user => name)]
+        end
       end
     end
 
@@ -192,31 +190,40 @@ module Hub
     def cherry_pick(args)
       unless args.include?('-m') or args.include?('--mainline')
         case ref = args.words.last
-        when %r{^(https?:)//github.com/(.+?)/(.+?)/commit/([a-f0-9]{7,40})}
-          scheme, user, repo, sha = $1, $2, $3, $4
+        when %r{^(?:https?:)//github.com/(.+?)/(.+?)/commit/([a-f0-9]{7,40})}
+          user, repo, sha = $1, $2, $3
           args[args.index(ref)] = sha
         when /^(\w+)@([a-f1-9]{7,40})$/
-          scheme, user, repo, sha = nil, $1, nil, $2
+          user, repo, sha = $1, nil, $2
           args[args.index(ref)] = sha
         else
           user = nil
         end
 
         if user
-          # cherry-pick comes after the fetch
-          args.after args.to_exec.join(' ')
-
           if user == repo_owner
             # fetch from origin if the repo belongs to the user
-            args.replace ['fetch', default_remote]
+            args.before ['fetch', default_remote]
           elsif remotes.include?(user)
-            args.replace ['fetch', user]
+            args.before ['fetch', user]
           else
-            secure = scheme == 'https:'
-            remote_url = github_url(:user => user, :repo => repo, :private => secure)
-            args.replace ['remote', 'add', '-f', user, remote_url]
+            remote_url = github_url(:user => user, :repo => repo, :private => false)
+            args.before ['remote', 'add', '-f', user, remote_url]
           end
         end
+      end
+    end
+
+    # $ hub am https://github.com/defunkt/hub/pull/55
+    # > curl https://github.com/defunkt/hub/pull/55.patch -o /tmp/55.patch
+    # > git am /tmp/55.patch
+    def am(args)
+      if url = args.find { |a| a =~ %r{^https?://github\.com/} }
+        idx = args.index(url)
+        url += '.patch' unless File.extname(url) == '.patch'
+        patch_file = File.join(ENV['TMPDIR'], File.basename(url))
+        args.before 'curl', ['-#LA', "hub #{Hub::Version}", url, '-o', patch_file]
+        args[idx] = patch_file
       end
     end
 
@@ -225,7 +232,7 @@ module Hub
     # > git remote add origin git@github.com:USER/REPO.git
     def init(args)
       if args.delete('-g')
-        url = github_url(:private => true, :repo => File.basename(Dir.pwd))
+        url = github_url(:private => true, :repo => current_dirname)
         args.after "git remote add origin #{url}"
       end
     end
@@ -306,35 +313,25 @@ module Hub
       remotes = args[1].split(',')
       args[1] = remotes.shift
 
-      after = "git push #{remotes.shift} #{branch}"
-
-      while remotes.length > 0
-        after += "; git push #{remotes.shift} #{branch}"
+      remotes.each do |name|
+        args.after ['push', name, branch]
       end
-
-      args.after after
     end
 
     # $ hub browse
-    # > open http://github.com/CURRENT_REPO
+    # > open https://github.com/CURRENT_REPO
     #
     # $ hub browse -- issues
-    # > open http://github.com/CURRENT_REPO/issues
+    # > open https://github.com/CURRENT_REPO/issues
     #
     # $ hub browse pjhyett/github-services
-    # > open http://github.com/pjhyett/github-services
-    #
-    # $ hub browse -p pjhyett/github-fi
-    # > open https://github.com/pjhyett/github-fi
+    # > open https://github.com/pjhyett/github-services
     #
     # $ hub browse github-services
-    # > open http://github.com/YOUR_LOGIN/github-services
+    # > open https://github.com/YOUR_LOGIN/github-services
     #
     # $ hub browse github-services wiki
-    # > open http://wiki.github.com/YOUR_LOGIN/github-services
-    #
-    # $ hub browse -p github-fi
-    # > open https://github.com/YOUR_LOGIN/github-fi
+    # > open https://github.com/YOUR_LOGIN/github-services/wiki
     def browse(args)
       args.shift
       browse_command(args) do
@@ -357,8 +354,6 @@ module Hub
 
         # $ hub browse -- wiki
         case subpage = args.shift
-        when 'wiki'
-          params[:web] = 'wiki'
         when 'commits'
           branch = (!dest && tracked_branch) || 'master'
           params[:web] = "/commits/#{branch}"
@@ -374,15 +369,13 @@ module Hub
     end
 
     # $ hub compare 1.0...fix
-    # > open http://github.com/CURRENT_REPO/compare/1.0...fix
+    # > open https://github.com/CURRENT_REPO/compare/1.0...fix
     # $ hub compare refactor
-    # > open http://github.com/CURRENT_REPO/compare/refactor
+    # > open https://github.com/CURRENT_REPO/compare/refactor
     # $ hub compare myfork feature
-    # > open http://github.com/myfork/REPO/compare/feature
-    # $ hub compare -p myfork topsecret
-    # > open https://github.com/myfork/REPO/compare/topsecret
+    # > open https://github.com/myfork/REPO/compare/feature
     # $ hub compare -u 1.0...2.0
-    # prints "http://github.com/CURRENT_REPO/compare/1.0...2.0"
+    # "https://github.com/CURRENT_REPO/compare/1.0...2.0"
     def compare(args)
       args.shift
       browse_command(args) do
@@ -569,11 +562,11 @@ help
     # and `compare`. Yields a block that returns params for `github_url`.
     def browse_command(args)
       url_only = args.delete('-u')
-      secure = args.delete('-p')
+      $stderr.puts "Warning: the `-p` flag has no effect anymore" if args.delete('-p')
       params = yield
 
       args.executable = url_only ? 'echo' : browser_launcher
-      args.push github_url({:web => true, :private => secure}.update(params))
+      args.push github_url({:web => true, :private => true}.update(params))
     end
 
 

@@ -2,6 +2,8 @@ module Hub
   # Provides methods for inspecting the environment, such as GitHub user/token
   # settings, repository info, and similar.
   module Context
+    private
+
     # Caches output when shelling out to git
     GIT_CONFIG = Hash.new do |cache, cmd|
       result = %x{git #{cmd}}.chomp
@@ -11,9 +13,9 @@ module Hub
     # Parses URLs for git remotes and stores info
     REMOTES = Hash.new do |cache, remote|
       if remote
-        url = GIT_CONFIG["config remote.#{remote}.url"]
+        urls = GIT_CONFIG["config --get-all remote.#{remote}.url"].to_s.split("\n")
 
-        if url && url.to_s =~ %r{\bgithub\.com[:/](.+)/(.+).git$}
+        if urls.find { |u| u =~ %r{\bgithub\.com[:/](.+)/(.+).git$} } 
           cache[remote] = { :user => $1, :repo => $2 }
         else
           cache[remote] = { }
@@ -34,13 +36,13 @@ module Hub
     end
 
     def repo_name
-      REMOTES[default_remote][:repo] || File.basename(Dir.pwd)
+      REMOTES[default_remote][:repo] || current_dirname
     end
 
     # Either returns the GitHub user as set by git-config(1) or aborts
     # with an error message.
     def github_user(fatal = true)
-      if user = GIT_CONFIG['config github.user']
+      if user = ENV['GITHUB_USER'] || GIT_CONFIG['config github.user']
         user
       elsif fatal
         abort("** No GitHub user set. See #{LGHCONF}")
@@ -48,7 +50,7 @@ module Hub
     end
 
     def github_token(fatal = true)
-      if token = GIT_CONFIG['config github.token']
+      if token = ENV['GITHUB_TOKEN'] || GIT_CONFIG['config github.token']
         token
       elsif fatal
         abort("** No GitHub token set. See #{LGHCONF}")
@@ -119,10 +121,7 @@ module Hub
       repo ||= repo_name
       secure = options[:private]
 
-      if options[:web] == 'wiki'
-        scheme = secure ? 'https:' : 'http:'
-        '%s//wiki.github.com/%s/%s/' % [scheme, user, repo]
-      elsif options[:web]
+      if options[:web]
         scheme = secure ? 'https:' : 'http:'
         path = options[:web] == true ? '' : options[:web].to_s
         '%s//github.com/%s/%s%s' % [scheme, user, repo, path]
@@ -137,6 +136,12 @@ module Hub
 
         url % [user, repo]
       end
+    end
+
+    DIRNAME = File.basename(Dir.pwd)
+
+    def current_dirname
+      DIRNAME
     end
   end
 end

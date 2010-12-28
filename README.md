@@ -30,7 +30,7 @@ Install
 
 `hub` is most easily installed as a standalone script:
 
-    curl -s http://defunkt.github.com/hub/standalone > ~/bin/hub &&
+    curl http://chriswanstrath.com/hub/standalone -sLo ~/bin/hub &&
     chmod 755 ~/bin/hub
 
 Assuming `~/bin/` is in your `$PATH`, you're ready to roll:
@@ -191,39 +191,33 @@ Creates a new public github repository and adds the remote `origin` at
 ### git browse
 
     $ git browse
-    > open http://github.com/CURRENT_REPO
+    > open https://github.com/CURRENT_REPO
 
     $ git browse -- issues
-    > open http://github.com/CURRENT_REPO/issues
+    > open https://github.com/CURRENT_REPO/issues
 
     $ git browse schacon/ticgit
-    > open http://github.com/schacon/ticgit
-
-    $ git browse -p schacon/ticgit
     > open https://github.com/schacon/ticgit
 
     $ git browse resque
-    > open http://github.com/YOUR_USER/resque
+    > open https://github.com/YOUR_USER/resque
 
     $ git browse resque network
-    > open http://github.com/YOUR_USER/resque/network
-
-    $ git browse -p resque
-    > open https://github.com:YOUR_USER/resque
+    > open https://github.com/YOUR_USER/resque/network
 
 ### git compare
 
     $ git compare refactor
-    > open http://github.com/CURRENT_REPO/compare/refactor
+    > open https://github.com/CURRENT_REPO/compare/refactor
 
     $ git compare 1.0...1.1
-    > open http://github.com/CURRENT_REPO/compare/1.0...1.1
+    > open https://github.com/CURRENT_REPO/compare/1.0...1.1
 
     $ git compare -u fix
-    > (http://github.com/CURRENT_REPO/compare/fix)
+    > (https://github.com/CURRENT_REPO/compare/fix)
 
     $ git compare other-user patch
-    > open http://github.com/other-user/REPO/compare/patch
+    > open https://github.com/other-user/REPO/compare/patch
 
 ### git submodule
 
@@ -249,7 +243,7 @@ GitHub Login
 ------------
 
 To get the most out of `hub`, you'll want to ensure your GitHub login
-is stored locally in your Git config.
+is stored locally in your Git config or environment variables.
 
 To test it run this:
 
@@ -262,6 +256,12 @@ If you see nothing, you need to set the config setting:
 For commands that require write access to GitHub (such as `fork`), you'll want to
 setup "github.token" as well. See [local GitHub config guide][2] for more information.
 
+Want to use environment variables instead of a local gitconfig?
+
+* `GITHUB_USER`  - If set, this will be used instead of the `github.user` config
+                   value to determine your GitHub username.
+* `GITHUB_TOKEN` - If set, this will be used instead of the `github.token` config
+                   value to determine your GitHub API token.
 
 Configuration
 -------------
@@ -315,7 +315,7 @@ contribute to `hub`:
 * `turn` (`gem install turn`)
 * `mg` (`gem install mg`)
 * `ronn` (`gem install ronn`)
-* `webhelper` (`gem install webhelper`)
+* `webmock` (`gem install webmock`)
 
 Meta
 ----
@@ -328,10 +328,10 @@ Meta
 * Gems: <http://gemcutter.org/gems/git-hub>
 
 
-Author
-------
+Authors
+-------
 
-Chris Wanstrath :: chris@ozmm.org :: @defunkt
+<https://github.com/defunkt/hub/contributors>
 
 [0]: http://help.github.com/forking/
 [1]: http://github.com/defunkt/hub/issues

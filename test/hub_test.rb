@@ -2,8 +2,18 @@ $LOAD_PATH.unshift File.dirname(__FILE__)
 require 'helper'
 require 'webmock/test_unit'
 
+WebMock::BodyPattern.class_eval do
+  undef normalize_hash
+  # override normalizing hash since it otherwise requires JSON
+  def normalize_hash(hash) hash end
+end
+
 class HubTest < Test::Unit::TestCase
-  include WebMock
+  if defined? WebMock::API
+    include WebMock::API
+  else
+    include WebMock
+  end
 
   COMMANDS = []
 
@@ -16,6 +26,8 @@ class HubTest < Test::Unit::TestCase
 
   def setup
     COMMANDS.replace %w[open groff]
+    Hub::Context::DIRNAME.replace 'hub'
+    Hub::Context::REMOTES.clear
 
     @git = Hub::Context::GIT_CONFIG.replace(Hash.new { |h, k|
       raise ArgumentError, "`git #{k}` not stubbed"
@@ -24,8 +36,8 @@ class HubTest < Test::Unit::TestCase
       'symbolic-ref -q HEAD' => 'refs/heads/master',
       'config github.user'   => 'tpw',
       'config github.token'  => 'abc123',
-      'config remote.origin.url'     => 'git://github.com/defunkt/hub.git',
-      'config remote.mislav.url'     => 'git://github.com/mislav/hub.git',
+      'config --get-all remote.origin.url' => 'git://github.com/defunkt/hub.git',
+      'config --get-all remote.mislav.url' => 'git://github.com/mislav/hub.git',
       'config branch.master.remote'  => 'origin',
       'config branch.master.merge'   => 'refs/heads/master',
       'config branch.feature.remote' => 'mislav',
@@ -228,18 +240,18 @@ class HubTest < Test::Unit::TestCase
     stub_remotes_group('xoebus', nil)
     stub_existing_fork('xoebus')
 
-    h = Hub("fetch xoebus")
-    assert_equal "git remote add xoebus git://github.com/xoebus/hub.git", h.command
-    assert_equal "git fetch xoebus", h.after
+    assert_commands "git remote add xoebus git://github.com/xoebus/hub.git",
+                    "git fetch xoebus",
+                    "fetch xoebus"
   end
 
   def test_fetch_new_remote_with_options
     stub_remotes_group('xoebus', nil)
     stub_existing_fork('xoebus')
 
-    h = Hub("fetch --depth=1 --prune xoebus")
-    assert_equal "git remote add xoebus git://github.com/xoebus/hub.git", h.command
-    assert_equal "git fetch --depth=1 --prune xoebus", h.after
+    assert_commands "git remote add xoebus git://github.com/xoebus/hub.git",
+                    "git fetch --depth=1 --prune xoebus",
+                    "fetch --depth=1 --prune xoebus"
   end
 
   def test_fetch_multiple_new_remotes
@@ -248,12 +260,10 @@ class HubTest < Test::Unit::TestCase
     stub_existing_fork('xoebus')
     stub_existing_fork('rtomayko')
 
-    h = Hub("fetch --multiple xoebus rtomayko")
-
-    assert_equal "git remote add xoebus git://github.com/xoebus/hub.git", h.command
-    expected = ["git remote add rtomayko git://github.com/rtomayko/hub.git"] <<
-                "git fetch --multiple xoebus rtomayko"
-    assert_equal expected.join('; '), h.after
+    assert_commands "git remote add xoebus git://github.com/xoebus/hub.git",
+                    "git remote add rtomayko git://github.com/rtomayko/hub.git",
+                    "git fetch --multiple xoebus rtomayko",
+                    "fetch --multiple xoebus rtomayko"
   end
 
   def test_fetch_multiple_comma_separated_remotes
@@ -262,12 +272,10 @@ class HubTest < Test::Unit::TestCase
     stub_existing_fork('xoebus')
     stub_existing_fork('rtomayko')
 
-    h = Hub("fetch xoebus,rtomayko")
-
-    assert_equal "git remote add xoebus git://github.com/xoebus/hub.git", h.command
-    expected = ["git remote add rtomayko git://github.com/rtomayko/hub.git"] <<
-                "git fetch --multiple xoebus rtomayko"
-    assert_equal expected.join('; '), h.after
+    assert_commands "git remote add xoebus git://github.com/xoebus/hub.git",
+                    "git remote add rtomayko git://github.com/rtomayko/hub.git",
+                    "git fetch --multiple xoebus rtomayko",
+                    "fetch xoebus,rtomayko"
   end
 
   def test_fetch_multiple_new_remotes_with_filtering
@@ -282,84 +290,80 @@ class HubTest < Test::Unit::TestCase
     # mygrp:  a remotes group; skipped
     # URL:    can't be a username; skipped
     # typo:   fork doesn't exist; skipped
-    h = Hub("fetch --multiple mislav xoebus mygrp git://example.com typo")
-
-    assert_equal "git remote add xoebus git://github.com/xoebus/hub.git", h.command
-    expected = "git fetch --multiple mislav xoebus mygrp git://example.com typo"
-    assert_equal expected, h.after
+    assert_commands "git remote add xoebus git://github.com/xoebus/hub.git",
+                    "git fetch --multiple mislav xoebus mygrp git://example.com typo",
+                    "fetch --multiple mislav xoebus mygrp git://example.com typo"
   end
 
   def test_cherry_pick
-    h = Hub("cherry-pick a319d88")
-    assert_equal "git cherry-pick a319d88", h.command
-    assert !h.args.after?
+    assert_forwarded "cherry-pick a319d88"
   end
 
   def test_cherry_pick_url
     url = 'http://github.com/mislav/hub/commit/a319d88'
-    h = Hub("cherry-pick #{url}")
-    assert_equal "git fetch mislav", h.command
-    assert_equal "git cherry-pick a319d88", h.after
+    assert_commands "git fetch mislav", "git cherry-pick a319d88", "cherry-pick #{url}"
   end
 
   def test_cherry_pick_url_with_fragment
     url = 'http://github.com/mislav/hub/commit/abcdef0123456789#comments'
-    h = Hub("cherry-pick #{url}")
-    assert_equal "git fetch mislav", h.command
-    assert_equal "git cherry-pick abcdef0123456789", h.after
+    assert_commands "git fetch mislav", "git cherry-pick abcdef0123456789", "cherry-pick #{url}"
   end
 
   def test_cherry_pick_url_with_remote_add
-    url = 'http://github.com/xoebus/hub/commit/a319d88'
-    h = Hub("cherry-pick #{url}")
-    assert_equal "git remote add -f xoebus git://github.com/xoebus/hub.git", h.command
-    assert_equal "git cherry-pick a319d88", h.after
-  end
-
-  def test_cherry_pick_private_url_with_remote_add
     url = 'https://github.com/xoebus/hub/commit/a319d88'
-    h = Hub("cherry-pick #{url}")
-    assert_equal "git remote add -f xoebus git@github.com:xoebus/hub.git", h.command
-    assert_equal "git cherry-pick a319d88", h.after
+    assert_commands "git remote add -f xoebus git://github.com/xoebus/hub.git",
+                    "git cherry-pick a319d88",
+                    "cherry-pick #{url}"
   end
 
   def test_cherry_pick_origin_url
     url = 'https://github.com/defunkt/hub/commit/a319d88'
-    h = Hub("cherry-pick #{url}")
-    assert_equal "git fetch origin", h.command
-    assert_equal "git cherry-pick a319d88", h.after
+    assert_commands "git fetch origin", "git cherry-pick a319d88", "cherry-pick #{url}"
   end
 
   def test_cherry_pick_github_user_notation
-    h = Hub("cherry-pick mislav@a319d88")
-    assert_equal "git fetch mislav", h.command
-    assert_equal "git cherry-pick a319d88", h.after
+    assert_commands "git fetch mislav", "git cherry-pick a319d88", "cherry-pick mislav@a319d88"
   end
 
   def test_cherry_pick_github_user_repo_notation
     # not supported
-    h = Hub("cherry-pick mislav/hubbub@a319d88")
-    assert_equal "git cherry-pick mislav/hubbub@a319d88", h.command
-    assert !h.args.after?
+    assert_forwarded "cherry-pick mislav/hubbub@a319d88"
   end
 
   def test_cherry_pick_github_notation_too_short
-    h = Hub("cherry-pick mislav@a319")
-    assert_equal "git cherry-pick mislav@a319", h.command
-    assert !h.args.after?
+    assert_forwarded "cherry-pick mislav@a319"
   end
 
   def test_cherry_pick_github_notation_with_remote_add
-    h = Hub("cherry-pick xoebus@a319d88")
-    assert_equal "git remote add -f xoebus git://github.com/xoebus/hub.git", h.command
-    assert_equal "git cherry-pick a319d88", h.after
+    assert_commands "git remote add -f xoebus git://github.com/xoebus/hub.git",
+                    "git cherry-pick a319d88",
+                    "cherry-pick xoebus@a319d88"
+  end
+
+  def test_am_untouched
+    assert_forwarded "am some.patch"
+  end
+
+  def test_am_pull_request
+    with_tmpdir('/tmp/') do
+      assert_commands "curl -#LA 'hub #{Hub::Version}' https://github.com/defunkt/hub/pull/55.patch -o /tmp/55.patch",
+                      "git am --signoff /tmp/55.patch -p2",
+                      "am --signoff https://github.com/defunkt/hub/pull/55 -p2"
+    end
+  end
+
+  def test_am_commit_url
+    with_tmpdir('/tmp/') do
+      url = 'https://github.com/davidbalbert/hub/commit/fdb9921'
+
+      assert_commands "curl -#LA 'hub #{Hub::Version}' #{url}.patch -o /tmp/fdb9921.patch",
+                      "git am --signoff /tmp/fdb9921.patch -p2",
+                      "am --signoff #{url} -p2"
+    end
   end
 
   def test_init
-    dirname = File.basename(Dir.pwd)
-    h = Hub("init -g")
-    assert_equal "git init", h.command
-    assert_equal "git remote add origin git@github.com:tpw/#{dirname}.git", h.after
+    assert_commands "git init", "git remote add origin git@github.com:tpw/hub.git", "init -g"
   end
 
   def test_init_no_login
@@ -371,55 +375,75 @@ class HubTest < Test::Unit::TestCase
   end
 
   def test_push_two
-    h = Hub("push origin,staging cool-feature")
-    assert_equal "git push origin cool-feature", h.command
-    assert_equal "git push staging cool-feature", h.after
+    assert_commands "git push origin cool-feature", "git push staging cool-feature",
+                    "push origin,staging cool-feature"
   end
 
   def test_push_more
-    h = Hub("push origin,staging,qa cool-feature")
-    assert_equal "git push origin cool-feature", h.command
-    assert_equal "git push staging cool-feature; git push qa cool-feature", h.after
+    assert_commands "git push origin cool-feature",
+                    "git push staging cool-feature",
+                    "git push qa cool-feature",
+                    "push origin,staging,qa cool-feature"
   end
 
   def test_create
-    Hub::Context::GIT_CONFIG['remote'] = nil # new repositories don't have remotes
+    stub_no_remotes
     stub_nonexisting_fork('tpw')
-    stub_request(:post, "github.com/api/v2/yaml/repos/create").with { |req|
-      params = Hash[*req.body.split(/[&=]/)]
-      params == { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub' }
-    }
+    stub_request(:post, "github.com/api/v2/yaml/repos/create").
+      with(:body => { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub' })
+
     expected = "remote add -f origin git@github.com:tpw/hub.git\n"
     expected << "created repository: tpw/hub\n"
     assert_equal expected, hub("create") { ENV['GIT'] = 'echo' }
   end
 
+  def test_create_with_env_authentication
+    stub_no_remotes
+    stub_nonexisting_fork('mojombo')
+
+    old_user  = ENV['GITHUB_USER']
+    old_token = ENV['GITHUB_TOKEN']
+    ENV['GITHUB_USER']  = 'mojombo'
+    ENV['GITHUB_TOKEN'] = '123abc'
+
+    stub_request(:post, "github.com/api/v2/yaml/repos/create").
+      with(:body => { 'login'=>'mojombo', 'token'=>'123abc', 'name' => 'hub' })
+
+    expected = "remote add -f origin git@github.com:mojombo/hub.git\n"
+    expected << "created repository: mojombo/hub\n"
+    assert_equal expected, hub("create") { ENV['GIT'] = 'echo' }
+
+  ensure
+    ENV['GITHUB_USER']  = old_user
+    ENV['GITHUB_TOKEN'] = old_token
+  end
+
   def test_create_private_repository
-    Hub::Context::GIT_CONFIG['remote'] = nil # new repositories don't have remotes
+    stub_no_remotes
     stub_nonexisting_fork('tpw')
-    stub_request(:post, "github.com/api/v2/yaml/repos/create").with { |req|
-      params = Hash[*req.body.split(/[&=]/)]
-      params == { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub', 'public' => '0' }
-    }
+    stub_request(:post, "github.com/api/v2/yaml/repos/create").
+      with(:body => { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub', 'public' => '0' })
+
     expected = "remote add -f origin git@github.com:tpw/hub.git\n"
     expected << "created repository: tpw/hub\n"
     assert_equal expected, hub("create -p") { ENV['GIT'] = 'echo' }
   end
 
   def test_create_with_description_and_homepage
-    Hub::Context::GIT_CONFIG['remote'] = nil # new repositories don't have remotes
+    stub_no_remotes
     stub_nonexisting_fork('tpw')
-    stub_request(:post, "github.com/api/v2/yaml/repos/create").with { |req|
-      params = Hash[*req.body.split(/[&=]/)]
-      params == { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub', 'description' => 'description', 'homepage' => 'http%3a%2f%2fgithub.com%2ftpw%2fhub.git' }
-    }
+    stub_request(:post, "github.com/api/v2/yaml/repos/create").with(:body => {
+      'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub',
+      'description' => 'toyproject', 'homepage' => 'http://example.com'
+    })
+
     expected = "remote add -f origin git@github.com:tpw/hub.git\n"
     expected << "created repository: tpw/hub\n"
-    assert_equal expected, hub("create -d description -h http://github.com/tpw/hub.git") { ENV['GIT'] = 'echo' }
+    assert_equal expected, hub("create -d toyproject -h http://example.com") { ENV['GIT'] = 'echo' }
   end
 
   def test_create_with_existing_repository
-    Hub::Context::GIT_CONFIG['remote'] = nil # new repositories don't have remotes
+    stub_no_remotes
     stub_existing_fork('tpw')
 
     expected = "tpw/hub already exists on GitHub\n"
@@ -429,7 +453,7 @@ class HubTest < Test::Unit::TestCase
   end
 
   def test_create_no_user
-    Hub::Context::GIT_CONFIG['remote'] = nil # new repositories don't have remotes
+    stub_no_remotes
     out = hub("create") do
       stub_github_token(nil)
     end
@@ -437,19 +461,14 @@ class HubTest < Test::Unit::TestCase
   end
 
   def test_create_outside_git_repo
-    @git = Hub::Context::GIT_CONFIG.replace(Hash.new { |h, k|
-        nil
-      })
-
+    stub_no_git_repo
     assert_equal "'create' must be run from inside a git repository\n", hub("create")
   end
 
   def test_create_origin_already_exists
     stub_nonexisting_fork('tpw')
-    stub_request(:post, "github.com/api/v2/yaml/repos/create").with { |req|
-      params = Hash[*req.body.split(/[&=]/)]
-      params == { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub' }
-    }
+    stub_request(:post, "github.com/api/v2/yaml/repos/create").
+      with(:body => { 'login'=>'tpw', 'token'=>'abc123', 'name' => 'hub' })
 
     expected = "remote -v\ncreated repository: tpw/hub\n"
     assert_equal expected, hub("create") { ENV['GIT'] = 'echo' }
@@ -457,10 +476,8 @@ class HubTest < Test::Unit::TestCase
 
   def test_fork
     stub_nonexisting_fork('tpw')
-    stub_request(:post, "github.com/api/v2/yaml/repos/fork/defunkt/hub").with { |req|
-      params = Hash[*req.body.split(/[&=]/)]
-      params == { 'login'=>'tpw', 'token'=>'abc123' }
-    }
+    stub_request(:post, "github.com/api/v2/yaml/repos/fork/defunkt/hub").
+      with(:body => { 'login'=>'tpw', 'token'=>'abc123' })
 
     expected = "remote add -f tpw git@github.com:tpw/hub.git\n"
     expected << "new remote: tpw\n"
@@ -489,6 +506,21 @@ class HubTest < Test::Unit::TestCase
     assert_includes "hub version #{Hub::Version}", out
   end
 
+  def test_exec_path
+    out = hub('--exec-path')
+    assert_equal "/usr/lib/git-core\n", out
+  end
+
+  def test_exec_path_arg
+    out = hub('--exec-path=/home/wombat/share/my-l33t-git-core')
+    assert_equal Hub::Commands.improved_help_text, hub("")
+  end
+
+  def test_html_path
+    out = hub('--html-path')
+    assert_equal "/usr/share/doc/git-doc\n", out
+  end
+
   def test_help
     assert_equal Hub::Commands.improved_help_text, hub("help")
   end
@@ -504,7 +536,6 @@ class HubTest < Test::Unit::TestCase
   def test_help_hub
     help_manpage = hub("help hub")
     assert_includes "git + hub = github", help_manpage
-    assert_includes "Chris Wanstrath :: chris@ozmm.org", help_manpage
     assert_includes <<-config, help_manpage
 Use git-config(1) to display the currently configured GitHub username:
 config
@@ -522,7 +553,7 @@ config
 
   def test_hub_compare
     assert_command "compare refactor",
-      "open http://github.com/defunkt/hub/compare/refactor"
+      "open https://github.com/defunkt/hub/compare/refactor"
   end
 
   def test_hub_compare_nothing
@@ -540,93 +571,81 @@ config
     stub_branch('refs/heads/feature')
 
     assert_command "compare",
-      "open http://github.com/mislav/hub/compare/experimental"
+      "open https://github.com/mislav/hub/compare/experimental"
   end
 
   def test_hub_compare_range
     assert_command "compare 1.0...fix",
-      "open http://github.com/defunkt/hub/compare/1.0...fix"
+      "open https://github.com/defunkt/hub/compare/1.0...fix"
   end
 
   def test_hub_compare_fork
     assert_command "compare myfork feature",
-      "open http://github.com/myfork/hub/compare/feature"
-  end
-
-  def test_hub_compare_private
-    assert_command "compare -p myfork topsecret",
-      "open https://github.com/myfork/hub/compare/topsecret"
+      "open https://github.com/myfork/hub/compare/feature"
   end
 
   def test_hub_compare_url
     assert_command "compare -u 1.0...1.1",
-      "echo http://github.com/defunkt/hub/compare/1.0...1.1"
+      "echo https://github.com/defunkt/hub/compare/1.0...1.1"
   end
 
   def test_hub_browse
-    assert_command "browse mojombo/bert", "open http://github.com/mojombo/bert"
+    assert_command "browse mojombo/bert", "open https://github.com/mojombo/bert"
   end
 
   def test_hub_browse_tracking_nothing
     stub_tracking_nothing
-    assert_command "browse mojombo/bert", "open http://github.com/mojombo/bert"
+    assert_command "browse mojombo/bert", "open https://github.com/mojombo/bert"
   end
 
   def test_hub_browse_url
-    assert_command "browse -u mojombo/bert", "echo http://github.com/mojombo/bert"
-  end
-
-  def test_hub_browse_private
-    assert_command "browse -p bmizerany/sinatra",
-      "open https://github.com/bmizerany/sinatra"
+    assert_command "browse -u mojombo/bert", "echo https://github.com/mojombo/bert"
   end
 
   def test_hub_browse_self
-    assert_command "browse resque", "open http://github.com/tpw/resque"
+    assert_command "browse resque", "open https://github.com/tpw/resque"
   end
 
   def test_hub_browse_subpage
     assert_command "browse resque commits",
-      "open http://github.com/tpw/resque/commits/master"
+      "open https://github.com/tpw/resque/commits/master"
     assert_command "browse resque issues",
-      "open http://github.com/tpw/resque/issues"
+      "open https://github.com/tpw/resque/issues"
     assert_command "browse resque wiki",
-      "open http://wiki.github.com/tpw/resque/"
+      "open https://github.com/tpw/resque/wiki"
   end
 
   def test_hub_browse_on_branch
     stub_branch('refs/heads/feature')
 
-    assert_command "browse resque", "open http://github.com/tpw/resque"
+    assert_command "browse resque", "open https://github.com/tpw/resque"
     assert_command "browse resque commits",
-      "open http://github.com/tpw/resque/commits/master"
+      "open https://github.com/tpw/resque/commits/master"
 
     assert_command "browse",
-      "open http://github.com/mislav/hub/tree/experimental"
+      "open https://github.com/mislav/hub/tree/experimental"
     assert_command "browse -- tree",
-      "open http://github.com/mislav/hub/tree/experimental"
+      "open https://github.com/mislav/hub/tree/experimental"
     assert_command "browse -- commits",
-      "open http://github.com/mislav/hub/commits/experimental"
-  end
-
-  def test_hub_browse_self_private
-    assert_command "browse -p github", "open https://github.com/tpw/github"
+      "open https://github.com/mislav/hub/commits/experimental"
   end
 
   def test_hub_browse_current
-    assert_command "browse", "open http://github.com/defunkt/hub"
-    assert_command "browse --", "open http://github.com/defunkt/hub"
+    assert_command "browse", "open https://github.com/defunkt/hub"
+    assert_command "browse --", "open https://github.com/defunkt/hub"
   end
 
   def test_hub_browse_current_subpage
     assert_command "browse -- network",
-      "open http://github.com/defunkt/hub/network"
+      "open https://github.com/defunkt/hub/network"
     assert_command "browse -- anything/everything",
-      "open http://github.com/defunkt/hub/anything/everything"
+      "open https://github.com/defunkt/hub/anything/everything"
   end
 
-  def test_hub_browse_current_private
-    assert_command "browse -p", "open https://github.com/defunkt/hub"
+  def test_hub_browse_deprecated_private
+    with_browser_env('echo') do
+      assert_includes "Warning: the `-p` flag has no effect anymore\n", hub("browse -p defunkt/hub")
+    end
   end
 
   def test_hub_browse_no_repo
@@ -668,6 +687,20 @@ config
     end
   end
 
+  def test_context_method_doesnt_hijack_git_command
+    assert_command 'remotes', 'git remotes'
+  end
+
+  def test_not_choking_on_ruby_methods
+    assert_forwarded 'id'
+    assert_forwarded 'name'
+  end
+
+  def test_multiple_remote_urls
+    stub_repo_url("git://example.com/other.git\ngit://github.com/my/repo.git")
+    assert_command "browse", "open https://github.com/my/repo"
+  end
+
   protected
 
     def stub_github_user(name)
@@ -679,7 +712,7 @@ config
     end
 
     def stub_repo_url(value)
-      @git['config remote.origin.url'] = value
+      @git['config --get-all remote.origin.url'] = value
       Hub::Context::REMOTES.clear
     end
 
@@ -694,6 +727,14 @@ config
 
     def stub_remotes_group(name, value)
       @git["config remotes.#{name}"] = value
+    end
+
+    def stub_no_remotes
+      @git['remote'] = ''
+    end
+
+    def stub_no_git_repo
+      @git.replace({})
     end
 
     def stub_existing_fork(user)
@@ -720,8 +761,15 @@ config
       ENV['BROWSER'] = browser
     end
 
+    def with_tmpdir(value)
+      dir, ENV['TMPDIR'] = ENV['TMPDIR'], value
+      yield
+    ensure
+      ENV['TMPDIR'] = dir
+    end
+
     def assert_browser(browser)
-      assert_command "browse", "#{browser} http://github.com/defunkt/hub"
+      assert_command "browse", "#{browser} https://github.com/defunkt/hub"
     end
 
     def with_ruby_platform(value)
