@@ -1,3 +1,13 @@
+hub (1.5.0-1) lucid; urgency=low
+
+  * New upstream release (v1.5.0):
+    - Support multiple URLs for a single remote
+    - Support for GITHUB_USER and GITHUB_TOKEN env variables
+    - Add ability to cherry-pick pull requests and commits with `hub am`
+    - Use HTTPS for GitHub URLs (browse/compare/cherry-pick)
+
+ -- Sebastian Boehm <sebastian@sometimesfood.org>  Wed, 29 Dec 2010 01:26:17 +0100
+
 hub (1.4.1-2) lucid; urgency=low
 
   * Fix minor packaging issues (Vcs-* headers, binary-arch target)
