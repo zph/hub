@@ -1,3 +1,13 @@
+hub (1.5.1-1) lucid; urgency=low
+
+  * New upstream release (v1.5.1):
+    - Support git aliases
+    - Gracefully handle HTTP errors in `create` and `fork`
+    - Support Gist URLs in `hub am`
+  * Add debian/rules targets for merging upstream and packaging
+
+ -- Sebastian Boehm <sebastian@sometimesfood.org>  Sat, 19 Mar 2011 16:53:46 +0100
+
 hub (1.5.0-1) lucid; urgency=low
 
   * New upstream release (v1.5.0):
