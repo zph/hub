@@ -30,7 +30,9 @@ class HubTest < Test::Unit::TestCase
     Hub::Context::REMOTES.clear
 
     @git = Hub::Context::GIT_CONFIG.replace(Hash.new { |h, k|
-      raise ArgumentError, "`git #{k}` not stubbed"
+      unless k.index('config alias.') == 0
+        raise ArgumentError, "`git #{k}` not stubbed"
+      end
     }).update(
       'remote' => "mislav\norigin",
       'symbolic-ref -q HEAD' => 'refs/heads/master',
@@ -72,10 +74,14 @@ class HubTest < Test::Unit::TestCase
     assert_command input, command
   end
 
-  def test_clone_with_arguments_and_path
-    input   = "clone --bare -o master -- resque"
-    command = "git clone --bare -o master -- git://github.com/tpw/resque.git"
+  def test_clone_with_arguments
+    input   = "clone --bare -o master resque"
+    command = "git clone --bare -o master git://github.com/tpw/resque.git"
     assert_command input, command
+  end
+
+  def test_clone_with_arguments_and_destination
+    assert_forwarded "clone --template=one/two git://github.com/tpw/resque.git --origin master resquetastic"
   end
 
   def test_your_private_clone_fails_without_config
@@ -95,27 +101,38 @@ class HubTest < Test::Unit::TestCase
   end
 
   def test_private_clone_left_alone
-    input   = "clone git@github.com:rtomayko/ronn.git"
-    command = "git clone git@github.com:rtomayko/ronn.git"
-    assert_command input, command
+    assert_forwarded "clone git@github.com:rtomayko/ronn.git"
   end
 
   def test_public_clone_left_alone
-    input   = "clone git://github.com/rtomayko/ronn.git"
-    command = "git clone git://github.com/rtomayko/ronn.git"
-    assert_command input, command
+    assert_forwarded "clone git://github.com/rtomayko/ronn.git"
   end
 
   def test_normal_public_clone_with_path
-    input   = "clone git://github.com/rtomayko/ronn.git ronn-dev"
-    command = "git clone git://github.com/rtomayko/ronn.git ronn-dev"
-    assert_command input, command
+    assert_forwarded "clone git://github.com/rtomayko/ronn.git ronn-dev"
   end
 
   def test_normal_clone_from_path
-    input   = "clone ./test"
-    command = "git clone ./test"
+    assert_forwarded "clone ./test"
+  end
+
+  def test_alias_expand
+    stub_alias 'c', 'clone --bare'
+    input   = "c rtomayko/ronn"
+    command = "git clone --bare git://github.com/rtomayko/ronn.git"
     assert_command input, command
+  end
+
+  def test_alias_expand_advanced
+    stub_alias 'c', 'clone --template="white space"'
+    input   = "c rtomayko/ronn"
+    command = "git clone '--template=white space' git://github.com/rtomayko/ronn.git"
+    assert_command input, command
+  end
+
+  def test_alias_doesnt_expand_for_unknown_commands
+    stub_alias 'c', 'compute --fast'
+    assert_forwarded "c rtomayko/ronn"
   end
 
   def test_remote_origin
@@ -137,21 +154,15 @@ class HubTest < Test::Unit::TestCase
   end
 
   def test_remote_from_rel_path
-    input = "remote add origin ./path"
-    command = "git remote add origin ./path"
-    assert_command input, command
+    assert_forwarded "remote add origin ./path"
   end
 
   def test_remote_from_abs_path
-    input = "remote add origin /path"
-    command = "git remote add origin /path"
-    assert_command input, command
+    assert_forwarded "remote add origin /path"
   end
 
   def test_private_remote_origin_as_normal
-    input   = "remote add origin git@github.com:defunkt/resque.git"
-    command = "git remote add origin git@github.com:defunkt/resque.git"
-    assert_command input, command
+    assert_forwarded "remote add origin git@github.com:defunkt/resque.git"
   end
 
   def test_public_submodule
@@ -233,7 +244,7 @@ class HubTest < Test::Unit::TestCase
   end
 
   def test_fetch_existing_remote
-    assert_command "fetch mislav", "git fetch mislav"
+    assert_forwarded "fetch mislav"
   end
 
   def test_fetch_new_remote
@@ -362,6 +373,16 @@ class HubTest < Test::Unit::TestCase
     end
   end
 
+  def test_am_gist
+    with_tmpdir('/tmp/') do
+      url = 'https://gist.github.com/8da7fb575debd88c54cf'
+
+      assert_commands "curl -#LA 'hub #{Hub::Version}' #{url}.txt -o /tmp/gist-8da7fb575debd88c54cf.txt",
+                      "git am --signoff /tmp/gist-8da7fb575debd88c54cf.txt -p2",
+                      "am --signoff #{url} -p2"
+    end
+  end
+
   def test_init
     assert_commands "git init", "git remote add origin git@github.com:tpw/hub.git", "init -g"
   end
@@ -394,6 +415,16 @@ class HubTest < Test::Unit::TestCase
 
     expected = "remote add -f origin git@github.com:tpw/hub.git\n"
     expected << "created repository: tpw/hub\n"
+    assert_equal expected, hub("create") { ENV['GIT'] = 'echo' }
+  end
+
+  def test_create_failed
+    stub_no_remotes
+    stub_nonexisting_fork('tpw')
+    stub_request(:post, "github.com/api/v2/yaml/repos/create").
+      to_return(:status => [401, "Your token is fail"])
+
+    expected = "error creating repository: Your token is fail (HTTP 401)\n"
     assert_equal expected, hub("create") { ENV['GIT'] = 'echo' }
   end
 
@@ -481,6 +512,15 @@ class HubTest < Test::Unit::TestCase
 
     expected = "remote add -f tpw git@github.com:tpw/hub.git\n"
     expected << "new remote: tpw\n"
+    assert_equal expected, hub("fork") { ENV['GIT'] = 'echo' }
+  end
+
+  def test_fork_failed
+    stub_nonexisting_fork('tpw')
+    stub_request(:post, "github.com/api/v2/yaml/repos/fork/defunkt/hub").
+      to_return(:status => [500, "Your fork is fail"])
+
+    expected = "error creating fork: Your fork is fail (HTTP 500)\n"
     assert_equal expected, hub("fork") { ENV['GIT'] = 'echo' }
   end
 
@@ -579,6 +619,12 @@ config
       "open https://github.com/defunkt/hub/compare/1.0...fix"
   end
 
+  def test_hub_compare_on_wiki
+    stub_repo_url 'git://github.com/defunkt/hub.wiki.git'
+    assert_command "compare 1.0...fix",
+      "open https://github.com/defunkt/hub/wiki/_compare/1.0...fix"
+  end
+
   def test_hub_compare_fork
     assert_command "compare myfork feature",
       "open https://github.com/myfork/hub/compare/feature"
@@ -635,6 +681,15 @@ config
     assert_command "browse --", "open https://github.com/defunkt/hub"
   end
 
+  def test_hub_browse_current_wiki
+    stub_repo_url 'git://github.com/defunkt/hub.wiki.git'
+
+    assert_command "browse", "open https://github.com/defunkt/hub/wiki"
+    assert_command "browse -- wiki", "open https://github.com/defunkt/hub/wiki"
+    assert_command "browse -- commits", "open https://github.com/defunkt/hub/wiki/_history"
+    assert_command "browse -- pages", "open https://github.com/defunkt/hub/wiki/_pages"
+  end
+
   def test_hub_browse_current_subpage
     assert_command "browse -- network",
       "open https://github.com/defunkt/hub/network"
@@ -688,7 +743,7 @@ config
   end
 
   def test_context_method_doesnt_hijack_git_command
-    assert_command 'remotes', 'git remotes'
+    assert_forwarded 'remotes'
   end
 
   def test_not_choking_on_ruby_methods
@@ -735,6 +790,10 @@ config
 
     def stub_no_git_repo
       @git.replace({})
+    end
+
+    def stub_alias(name, value)
+      @git["config alias.#{name}"] = value
     end
 
     def stub_existing_fork(user)

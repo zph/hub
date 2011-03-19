@@ -41,6 +41,22 @@ module Hub
     API_FORK   = 'http://github.com/api/v2/yaml/repos/fork/%s/%s'
     API_CREATE = 'http://github.com/api/v2/yaml/repos/create'
 
+    def run(args)
+      # Hack to emulate git-style
+      args.unshift 'help' if args.grep(/^[^-]|version|exec-path$|html-path/).empty?
+
+      cmd = args[0]
+      expanded_args = expand_alias(cmd)
+      cmd = expanded_args[0] if expanded_args
+
+      # git commands can have dashes
+      cmd = cmd.sub(/(\w)-/, '\1_')
+      if method_defined?(cmd) and cmd != 'run'
+        args[0, 1] = expanded_args if expanded_args
+        send(cmd, args)
+      end
+    end
+
     # $ hub clone rtomayko/tilt
     # > git clone git://github.com/rtomayko/tilt.
     #
@@ -54,16 +70,14 @@ module Hub
     # > git clone git@github.com:YOUR_LOGIN/hemingway.git
     def clone(args)
       ssh = args.delete('-p')
-
-      last_args = args[1..-1].reject { |arg| arg == "--" }.last(3)
-      last_args.each do |arg|
-        if arg =~ /^-/
-          # Skip mandatory arguments.
-          last_args.shift if arg =~ /^(--(ref|o|br|u|t|d)[^=]+|-(o|b|u|d))$/
-          next
-        end
-
-        if arg =~ %r{.+?://|.+?@} || File.directory?(arg)
+      has_values = /^(--(upload-pack|template|depth|origin|branch|reference)|-[ubo])$/
+      
+      idx = 1
+      while idx < args.length
+        arg = args[idx]
+        if arg.index('-') == 0
+          idx += 1 if arg =~ has_values
+        elsif arg.index('://') or arg.index('@') or File.directory?(arg)
           # Bail out early for URLs and local paths.
           break
         elsif arg.scan('/').size <= 1 && !arg.include?(':')
@@ -72,6 +86,7 @@ module Hub
           args[args.index(arg)] = github_url(:repo => arg, :private => ssh)
           break
         end
+        idx += 1
       end
     end
 
@@ -218,10 +233,12 @@ module Hub
     # > curl https://github.com/defunkt/hub/pull/55.patch -o /tmp/55.patch
     # > git am /tmp/55.patch
     def am(args)
-      if url = args.find { |a| a =~ %r{^https?://github\.com/} }
+      if url = args.find { |a| a =~ %r{^https?://(gist\.)?github\.com/} }
         idx = args.index(url)
-        url += '.patch' unless File.extname(url) == '.patch'
-        patch_file = File.join(ENV['TMPDIR'], File.basename(url))
+        gist = $1 == 'gist.'
+        ext = gist ? '.txt' : '.patch'
+        url += ext unless File.extname(url) == ext
+        patch_file = File.join(ENV['TMPDIR'], "#{gist ? 'gist-' : ''}#{File.basename(url)}")
         args.before 'curl', ['-#LA', "hub #{Hub::Version}", url, '-o', patch_file]
         args[idx] = patch_file
       end
@@ -257,6 +274,10 @@ module Hub
           args.after { puts "new remote: #{github_user}" }
         end
       end
+    rescue Net::HTTPExceptions
+      response = $!.response
+      warn "error creating fork: #{response.message} (HTTP #{response.code})"
+      exit 1
     end
 
     # $ hub create
@@ -301,6 +322,10 @@ module Hub
 
         args.after { puts "#{action}: #{github_user}/#{repo_name}" }
       end
+    rescue Net::HTTPExceptions
+      response = $!.response
+      warn "error creating repository: #{response.message} (HTTP #{response.code})"
+      exit 1
     end
 
     # $ hub push origin,staging cool-feature
@@ -660,7 +685,8 @@ help
     # Returns nothing.
     def fork_repo
       url = API_FORK % [repo_owner, repo_name]
-      Net::HTTP.post_form(URI(url), 'login' => github_user, 'token' => github_token)
+      response = Net::HTTP.post_form(URI(url), 'login' => github_user, 'token' => github_token)
+      response.error! unless Net::HTTPSuccess === response
     end
 
     # Creates a new repo using the GitHub API.
@@ -673,7 +699,17 @@ help
       params['description'] = options[:description] if options[:description]
       params['homepage'] = options[:homepage] if options[:homepage]
 
-      Net::HTTP.post_form(URI(url), params)
+      response = Net::HTTP.post_form(URI(url), params)
+      response.error! unless Net::HTTPSuccess === response
+    end
+
+    def expand_alias(cmd)
+      if expanded = git_alias_for(cmd)
+        if expanded.index('!') != 0
+          require 'shellwords' unless expanded.respond_to? :shellsplit
+          expanded.shellsplit
+        end
+      end
     end
 
   end

@@ -106,6 +106,10 @@ module Hub
       GIT_CONFIG['config --bool hub.http-clone'] == 'true'
     end
 
+    def git_alias_for(name)
+      GIT_CONFIG["config alias.#{name}"]
+    end
+
     # Core.repositoryformatversion should exist for all git
     # repositories, and be blank for all non-git repositories. If
     # there's a better config setting to check here, this can be
@@ -124,6 +128,14 @@ module Hub
       if options[:web]
         scheme = secure ? 'https:' : 'http:'
         path = options[:web] == true ? '' : options[:web].to_s
+        if repo =~ /\.wiki$/
+          repo = repo.sub(/\.wiki$/, '')
+          unless '/wiki' == path
+            path = '/wiki%s' % if path =~ %r{^/commits/} then '/_history'
+              else path.sub(/\w+/, '_\0')
+              end
+          end
+        end
         '%s//github.com/%s/%s%s' % [scheme, user, repo, path]
       else
         if secure
