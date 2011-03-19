@@ -46,3 +46,15 @@ merge-upstream:
 	uscan --download-version $$upstream_version --force-download --rename ; \
 	pristine-tar commit ../hub_$$upstream_version.orig.tar.gz master
 	git merge --no-ff master
+
+define get_debian_version
+	debian_version=`dpkg-parsechangelog | \
+			grep -E '^Version: ' | \
+			cut -d ' ' -f 2`
+endef
+
+finish-release:
+	git-dch --release --auto
+	git add debian/changelog
+	$(get_debian_version) ; git commit -m "debian/v$$debian_version"
+	git-buildpackage --git-tag
