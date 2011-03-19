@@ -30,3 +30,19 @@ binary: binary-indep
 
 get-orig-source:
 	uscan --download-current-version --force-download --rename
+
+define get_upstream_version
+	upstream_version=`git describe --tags \
+				--match 'v[0-9]*' --abbrev=0 HEAD | tr -d 'v'`
+endef
+
+merge-upstream:
+	git checkout master
+	git pull --tags git://github.com/defunkt/hub.git master
+	$(get_upstream_version) ; \
+	git reset --hard v$$upstream_version ; \
+	git checkout debian ; \
+	git-dch --new-version=$$upstream_version-1 --snapshot --auto ; \
+	uscan --download-version $$upstream_version --force-download --rename ; \
+	pristine-tar commit ../hub_$$upstream_version.orig.tar.gz master
+	git merge --no-ff master
