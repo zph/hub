@@ -279,6 +279,13 @@ module Hub
       end
     end
 
+    # $ hub keys defunkt
+    # > curl "https://github.com/defunkt.keys
+    def keys(args)
+      response = Net::HTTP.get(URI "https://github.com/#{args[1]}.keys")
+      puts response
+      exit(0)
+    end
     # $ hub submodule add wycats/bundler vendor/bundler
     # > git submodule add git://github.com/wycats/bundler.git vendor/bundler
     #
